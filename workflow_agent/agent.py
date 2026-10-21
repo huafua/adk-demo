@@ -2,7 +2,7 @@ import os
 
 from dotenv import load_dotenv
 from google.adk import Workflow,Agent,Context
-from google.adk.workflow import node
+from google.adk.workflow import node,JoinNode
 from google.genai import types
 from google.adk.models.lite_llm import LiteLlm
 
@@ -38,6 +38,9 @@ def process(ctx:Context) -> str:
     goodbye_input = ctx.state.get("goodbye_input", "")
     return f"Hello: {hello_input}, Goodbye: {goodbye_input}"
 
+# 這個節點用於收集多個分支的輸入，並在所有分支完成後再進行後續處理
+joint=JoinNode(name="collect_data")
+
 root_agent = Workflow(
 	name="hello_world_workflow",
 	edges=[
@@ -45,7 +48,9 @@ root_agent = Workflow(
         (math_question,receiver_agent),
         (receiver_agent, hello),
         (receiver_agent, goodbye),
-        (goodbye, process),
-        (hello, process)
+        (goodbye, joint),
+        (hello, joint),
+        # 將多個分支的輸入收集到 joint 節點，再進行後續處理
+        (joint, process)
     ],
 )
