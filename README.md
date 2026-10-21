@@ -1,256 +1,88 @@
-# DeepSeek + ADK 使用教學
+# ADK Demo
 
-這份文件說明如何在 Google ADK(Agent Development Kit)中接入 DeepSeek，並建立一個可執行的 AI Agent。
+這個專案包含兩個 Google ADK 應用：一個使用 DeepSeek 回答數學問題的工作流，以及一個以正體中文回答 React 問題的教師 Agent。
 
-## 1. 先說明整體架構
+## 專案結構
 
-我們會使用以下方式組合：
-
-- `google-adk`：建立`Agent`
-- `litellm`：作為大模型適配層
-- `python-dotenv`：讀取 `.env` 環境變數
-- `DeepSeek API`：提供模型推理能力
-
-核心思路是：
-
-```python
-model=LiteLlm(
-    model="deepseek/deepseek-v4-flash",
-    api_key=os.getenv("DEEPSEEK_API_KEY"),
-    api_base=os.getenv("DEEPSEEK_API_BASE"),
-)
+```text
+teacher_agent/
+  agent.py          # React 教學 Agent，匯出 root_agent
+workflow_agent/
+  agent.py          # 數學問答 Workflow，匯出 root_agent
+requirements.txt   # 目前為空
 ```
+先確認 Python 版本：
 
-這樣 ADK 就能用 DeepSeek 來回答問題、執行工具，以及啟動 AI Agent。
-
-
-## 2. 環境準備
-
-### 2.1 檢查 Python
-
-先確認你的系統已安裝 Python：
-
-```bash
+```powershell
 python --version
 ```
 
-建議使用 Python 3.10 以上版本。
-
-### 2.2 建立專案
-
-1. 克隆項目
-
-    ```
-    git clone https://github.com/huafua/adk-demo
-    ```
-
-2. 安裝相依套件
-
-    到項目目錄中，執行`pip install -r requirements.txt`
-
-3. 取得 DeepSeek API Key
-
-    - 登入 DeepSeek 官方平台
-    - 進入 API 金鑰管理頁面
-    - 建立新的 API Key
-    - 複製金鑰並妥善保存
-
-    > 請不要把 API Key 寫死在程式碼裡，也不要提交到公開 GitHub 專案中。
-
-4. 設定 `.env`
-
-    在專案根目錄建立 `.env`：
-
-    ```env
-    DEEPSEEK_API_KEY="your_deepseek_api_key_here"
-    DEEPSEEK_API_BASE="https://api.deepseek.com"
-    ```
-
-5. 建立 Agent 程式碼
-
-    建立 `agent.py`：
-
-    ```python
-    import os
-    from dotenv import load_dotenv
-    from google.adk import Agent, Runner
-    from google.adk.models.lite_llm import LiteLlm
-
-    load_dotenv()
-
-    MODEL_NAME = "deepseek/deepseek-v4-flash"
-
-
-    def get_weather(city: str) -> str:
-        """取得指定城市的天氣資訊。"""
-        return f"{city} 目前天氣晴朗，氣溫 25 度。"
-
-
-    root_agent = Agent(
-        name="DeepSeekAgent",
-        instruction="你是一個由 DeepSeek 驅動的助手，請使用繁體中文回答問題，必要時可調用工具。",
-        model=LiteLlm(
-            model=MODEL_NAME,
-            api_key=os.getenv("DEEPSEEK_API_KEY"),
-            api_base=os.getenv("DEEPSEEK_API_BASE"),
-        ),
-        tools=[get_weather],
-    )
-
-
-    if __name__ == "__main__":
-        print("正在啟動 DeepSeek ADK Agent...")
-        Runner(root_agent).run()
-    ```
-
-6. 執行 Agent
-
-    在終端機中執行：
-
-    ```bash
-    python agent.py
-    ```
-
-    如果一切正常，系統會啟動互動式 Agent。你可以輸入：
-
-    ```text
-    你好
-    ```
-
-    或：
-
-    ```text
-    請問台北今天的天氣如何？
-    ```
-
-    若你有定義工具，Agent 可能會自動判斷是否需要使用該工具。
-
-7. 模型名稱說明
-
-    DeepSeek 在 LiteLLM 裡通常使用這種格式：
-
-    ```text
-    deepseek/deepseek-chat
-    deepseek/deepseek-reasoner
-    deepseek/deepseek-v3
-    deepseek/deepseek-v4-flash
-    openai/deepseek-chat
-    ```
-
-    常見設定：
-
-    ```python
-    MODEL_NAME = "deepseek/deepseek-v4-flash"
-    ```
-
-    如果你遇到錯誤，例如：
-
-    - `model not found`
-    - `invalid model name`
-    - `401 Unauthorized`
-
-    通常代表以下任一項有問題：
-
-    - 模型名稱填錯
-    - API Key 無效
-    - API Base URL 錯誤
-
-### 3. 常見問題排查
-
-- **ModuleNotFoundError: No module named 'google.adk'**
-
-    修正方式：
-
-    ```bash
-    pip install -r requirements.txt
-    ```
-    確認你已經啟用正確的虛擬環境。
-
-- **401 Unauthorized**
-
-    代表 API 金鑰無法被驗證。請確認：
-
-    - `.env` 是否正確
-    - `DEEPSEEK_API_KEY` 是否值正確
-    - API 金鑰是否過期或失效
-
-    - `model not found`
-
-    請檢查：
-
-    ```python
-    MODEL_NAME = "deepseek/deepseek-v4-flash"
-    ```
-
-    或嘗試更常見的名稱：
-
-    ```python
-    MODEL_NAME = "deepseek/deepseek-chat"
-    ```
-
-- **API timeout 或連線錯誤**
-
-    請確認：
-
-    - 網路可用
-    - `DEEPSEEK_API_BASE="https://api.deepseek.com"`
-    - 服務狀態正常
-
-
-### 4. 加入更多工具(進階)
-
-你可以讓 Agent 恢復更完整的能力，例如查天氣、查資料、讀取文件、整理摘要等
-
-範例：
-
-```python
-import os
-from dotenv import load_dotenv
-from google.adk import Agent
-from google.adk.models.lite_llm import LiteLlm
-
-load_dotenv()
-
-MODEL_NAME = "deepseek/deepseek-v4-flash"
-
-def search_docs(keyword: str) -> str:
-    return f"已搜尋關鍵字: {keyword}，這裡是相關文件內容摘要。"
-
-def get_current_time() -> str:
-    import datetime
-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-root_agent = Agent(
-    name="workflow_agent",
-    instruction="你是一個有工具能力的助手，請優先使用工具來回答使用者問題。",
-    model=LiteLlm(
-        model=MODEL_NAME,
-        api_key=os.getenv("DEEPSEEK_API_KEY"),
-        api_base=os.getenv("DEEPSEEK_API_BASE"),
-    ),
-    tools=[search_docs, get_current_time],
-)
+建議使用 Python 3.10 或更新版本。在專案根目錄建立並啟用虛擬環境，再安裝目前使用的套件：
+## 安裝
+
+在專案根目錄建立並啟用虛擬環境，再安裝目前使用的套件：
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install google-adk litellm python-dotenv
 ```
-這樣 Agent 就不只是聊天，還能根據需求呼叫工具。
 
-### 5. 最佳實務建議
+請使用自己的有效 API 金鑰。不要將 API 金鑰寫死在程式碼或提交到版本控制；若金鑰曾經外洩，請立即撤銷並重新建立。
+`requirements.txt` 目前沒有列出相依套件，因此上述安裝命令直接指定所需套件。
 
-    - 不要把 API Key 直接寫進程式碼
-    - 把敏感設定放進 `.env`
-    - 先用最簡單的 Agent 測試，再逐步擴大功能
-    - 如果模型名稱或金鑰有錯，優先檢查這兩個項目
+## 設定 DeepSeek
 
-### 6. 完整總結
+執行 Agent 前，設定下列環境變數：
 
-使用 DeepSeek + ADK 的流程可以概括為：
+```text
+DEEPSEEK_API_KEY=your_deepseek_api_key
+DEEPSEEK_API_BASE=https://api.deepseek.com
+```
 
-1. 安裝 `google-adk`、`litellm`、`python-dotenv`
-2. 取得 DeepSeek API Key
-3. 建立 `.env`
-4. 在 `LiteLlm` 中指定 `model` 與 `api_base`
-5. 建立 `Agent`
-6. 註冊工具（可選）
-7. 執行 `python agent.py`
-8. 測試文字互動與工具呼叫
+PowerShell 範例：
 
-只要完成上述步驟，你就能在 ADK 中成功使用 DeepSeek 作為模型後端。
+```powershell
+$env:DEEPSEEK_API_KEY = "your_deepseek_api_key"
+$env:DEEPSEEK_API_BASE = "https://api.deepseek.com"
+
+## 常見問題
+
+- **找不到 `google.adk`**：確認虛擬環境已啟用，並在該環境執行 `python -m pip install google-adk litellm python-dotenv`。
+- **401 Unauthorized**：確認 `DEEPSEEK_API_KEY` 有效，並檢查啟動該 Agent 的 shell 是否有設定金鑰。
+- **找不到模型或模型名稱無效**：檢查 Agent 的 `LiteLlm` 設定。工作流目前使用 `deepseek/deepseek-flash`，教師 Agent 使用 `deepseek/deepseek-chat`；模型可用性依 DeepSeek 與 LiteLLM 支援情況而異。
+- **連線逾時或 API 無法連線**：確認網路連線、`DEEPSEEK_API_BASE` 是否為 `https://api.deepseek.com`，以及 API 服務是否正常。
+```
+
+也可以將變數放在專案根目錄的 `.env`。`workflow_agent/agent.py` 會載入 `.env`；`teacher_agent/agent.py` 不會自行載入 `.env`，使用該 Agent 時請先在 shell 設定環境變數。不要將 API 金鑰提交到版本控制。
+
+## 應用說明
+
+### 數學問答工作流
+
+`workflow_agent/agent.py` 的 `root_agent` 是一個 ADK `Workflow`：
+
+1. `math_question` 讀取使用者訊息並轉成大寫。
+2. `receiver_agent` 使用 `deepseek/deepseek-flash` 產生數學回答。
+3. `hello` 和 `goodbye` 分支分別將輸入保存至工作階段狀態，並回傳各自的完成標記。
+4. `process` 讀取兩個分支的狀態並組合工作流輸出。
+
+### React 教師 Agent
+
+`teacher_agent/agent.py` 匯出一般 ADK Agent，使用 `deepseek/deepseek-chat`，以正體中文回答 React 前端框架相關問題。
+
+## 啟動 ADK 網頁介面
+
+從專案根目錄執行其中一個命令：
+
+```powershell
+adk web workflow_agent
+```
+
+或啟動 React 教師 Agent：
+
+```powershell
+adk web teacher_agent
+```
+
+啟動後，依終端機顯示的網址開啟網頁介面。若找不到 `adk` 命令，請確認虛擬環境已啟用並已安裝 `google-adk`。ADK Web 是供本機開發使用的未驗證服務，請勿公開暴露在不可信任的網路上。
