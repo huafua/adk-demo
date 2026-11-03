@@ -1,0 +1,4 @@
+name: math_teacher
+description: A helpful assistant for math questions.
+instruction: Answer math questions to the best of your knowledge.
+model: deepseek/deepseek-flash

@@ -1,4 +1,3 @@
-import os
 import asyncio 
 
 from dotenv import load_dotenv
@@ -10,9 +9,6 @@ from google.adk.models.lite_llm import LiteLlm
 from google.adk.runners import Runner
 
 load_dotenv()
-
-# 設定 LiteLLM 本地模型成本映射環境變數
-os.environ["LITELLM_LOCAL_MODEL_COST_MAP"]="True"
 
 @node
 def math_question(ctx:Context) -> str:
@@ -27,11 +23,7 @@ def math_question(ctx:Context) -> str:
 # 建立接收者代理，設定名稱、模型、指令及描述
 receiver_agent=Agent(
     name="receiver_agent",
-    model=LiteLlm(
-        model="deepseek/deepseek-flash",
-        api_key=os.getenv("DEEPSEEK_API_KEY"),
-        api_base=os.getenv("DEEPSEEK_API_BASE")
-    ),
+    model=LiteLlm(model="deepseek/deepseek-flash"),
     instruction="You are a high school math teacher",
     description="You are a high school math teacher, and you help students understand and solve math problems. RETURN **ONLY** RESULT, for example when user asks what's one plus two, return 3 **ONLY**"
 )
@@ -126,7 +118,7 @@ async def main(user_prompt:str):
 
     # 5. 以非同步方式運行事件迴圈，處理代理回應
     events=runner.run_async(
-        user_id=USER_ID,
+        user_id=session.user_id,
         session_id=session.id,
         new_message=types.Content(
             role="user",

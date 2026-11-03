@@ -1,5 +1,4 @@
 import asyncio
-import os
 
 from google.genai import types
 from google.adk.agents import Agent
@@ -8,19 +7,12 @@ from google.adk.sessions import InMemorySessionService
 from google.adk.runners import Runner
 
 
-# 設定 LiteLLM 本地模型成本映射環境變數
-os.environ["LITELLM_LOCAL_MODEL_COST_MAP"]="True"
-
 # 建立根代理，設定名稱、指令、描述及使用的模型
 root_agent=Agent(
     name="TeacherAgent",
     instruction="你是一個由 DeepSeek 驅動的經驗豐富的前端框架React教師助手，請使用正體中文回答問題",
     description="這個 Agent 專注於教授前端框架 React 的知識，並提供相關的教學與指導。",
-    model=LiteLlm(
-        model="deepseek/deepseek-chat",
-        api_key=os.getenv("DEEPSEEK_API_KEY"),
-        api_base=os.getenv("DEEPSEEK_API_BASE")
-    )
+    model=LiteLlm(model="deepseek/deepseek-flash")
 )
 
 async def main():
@@ -44,7 +36,7 @@ async def main():
 
     # 3. 建立會話服務並創建會話
     session_service = InMemorySessionService()
-    await session_service.create_session(
+    session=await session_service.create_session(
         app_name="demo_app",
         user_id=USER_ID,
         session_id=SESSION_ID
@@ -59,8 +51,8 @@ async def main():
 
     # 5. 以非同步方式運行事件迴圈，處理代理回應
     events = runner.run_async(
-        user_id=USER_ID,
-        session_id=SESSION_ID,
+        user_id=session.user_id,
+        session_id=session.id,
         new_message=types.Content(
             role="user",
             parts=[types.Part.from_text(text=user_prompt)]

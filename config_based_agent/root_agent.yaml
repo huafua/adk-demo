@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/google/adk-python/refs/heads/main/src/google/adk/agents/config_schemas/AgentConfig.json
+name: root_agent
+description: A helpful assistant for user questions.
+instruction: |
+  Answer user questions to the best of your knowledge,
+  if the user ask something about math, refer to the math_teacher sub-agent.
+  if the user ask something about history, refer to the history_teacher sub-agent.
+  if the user ask something about files,try using the tools provided.
+model: deepseek/deepseek-flash
+
+sub_agents:
+   - config_path: history_teacher.yaml
+   - config_path: math_teacher.yaml
+  
+tools:
+  - name: config_based_agent.tools.greeting
+  - name: config_based_agent.tools.save_file
+  - name: config_based_agent.tools.read_file
+  - name: config_based_agent.tools.list_files
