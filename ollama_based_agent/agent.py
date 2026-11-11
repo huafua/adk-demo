@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from google.adk.agents import Agent
 from google.adk.models import LiteLlm
@@ -9,6 +10,8 @@ from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
+
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 
 root_agent=Agent(
     name="ollama_based_agent",
@@ -45,7 +48,11 @@ async def main():
         new_message=types.Content(
             role="user",
             parts=[
-                types.Part.from_text(text="Who is the first Emperor in Chinese history?")
+                types.Part.from_text(text="please extract the text from given image, nothing more"),
+                types.Part.from_bytes(
+                    data=(Path(__file__).parent / "images" / "ad.png").read_bytes(),
+                    mime_type="image/png",
+                ),
             ]
         )
     )
