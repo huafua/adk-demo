@@ -1,12 +1,13 @@
 # Google ADK 教學範例
 
-本專案用三個小應用逐步介紹 Google ADK 的核心概念：單一 Agent、圖形化 Workflow，以及透過 MCP 呼叫外部工具。三個應用都使用 DeepSeek 作為模型後端。
+本專案以多個小應用介紹 Google ADK 的核心概念：單一 Agent、圖形化 Workflow，以及透過 MCP 呼叫外部工具。大部分範例使用 DeepSeek；`ollama_based_agent` 則示範透過 Ollama 在本機執行模型。
 
 ## 學習路線
 
 1. 先執行 `teacher_agent`，認識 Agent 的角色指示、模型與 `root_agent` 入口。
 2. 再讀 `workflow_agent`，了解如何把函式節點、Agent、分支和 Join 組成工作流。
-3. 最後執行 `mcp_agent`，觀察 Agent 如何透過 MCP 工具集呼叫獨立的工具伺服器。
+3. 執行 `mcp_agent`，觀察 Agent 如何透過 MCP 工具集呼叫獨立的工具伺服器。
+4. 想在本機執行模型時，試試 `ollama_based_agent`，了解如何透過 Ollama 的 OpenAI 相容 API 連接模型。
 
 ## 專案結構
 
@@ -14,6 +15,9 @@
 mcp_agent/
   agent.py       # 把 MCP 工具集接到健康管理 Agent
   server.py      # FastMCP stdio server，提供 calculate_bmi
+ollama_based_agent/
+  agent.py       # 透過 Ollama 本機模型回答中國古代史問題
+  README.md      # Ollama 安裝、設定與執行說明
 teacher_agent/
   agent.py       # React 教師 Agent
 workflow_agent/
@@ -34,7 +38,7 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-`google-adk` 提供 Agent、Workflow 和 Web UI；`litellm` 讓 ADK 呼叫 DeepSeek；`python-dotenv` 供數學工作流讀取 `.env`；`fastmcp` 和 MCP 相依套件用於工具伺服器。
+`google-adk` 提供 Agent、Workflow 和 Web UI；`litellm` 讓 ADK 呼叫 DeepSeek 或 Ollama 的 OpenAI 相容 API；`python-dotenv` 供部分範例讀取 `.env`；`fastmcp` 和 MCP 相依套件用於工具伺服器。使用 `ollama_based_agent` 另外需要安裝並啟動 Ollama。
 
 ## 2. 設定模型金鑰
 
@@ -53,6 +57,24 @@ DEEPSEEK_API_BASE=https://api.deepseek.com
 ```
 
 目前只有 `workflow_agent/agent.py` 明確呼叫 `load_dotenv()`。`teacher_agent` 和 `mcp_agent` 不會自行載入 `.env`，使用它們時請先在 shell 設定環境變數。不要把 API 金鑰寫進程式碼或提交到版本控制。
+
+### Ollama 本機模型
+
+`ollama_based_agent` 不使用 DeepSeek API 金鑰，而是透過 Ollama 的 OpenAI 相容 API 連線。先安裝 Ollama，下載範例使用的 `llava:7b` 模型，並確保 Ollama 服務正在執行：
+
+```powershell
+ollama pull llava:7b
+ollama serve
+```
+
+若 Ollama 已經在背景執行，就不需要再啟動 `ollama serve`。`ollama_based_agent/.env` 預設設定如下；本機 Ollama 不驗證 API key，因此 `OPENAI_API_KEY` 使用非空的佔位值即可：
+
+```env
+OPENAI_API_KEY=localhost-api
+OPENAI_API_BASE=http://localhost:11434/v1
+```
+
+Agent 使用 LiteLLM 的 `openai/llava:7b` 模型名稱呼叫此端點；`openai/` 是 LiteLLM 的 provider 前綴，不代表請求會送往 OpenAI。更多設定與排錯方式請見 [`ollama_based_agent/README.md`](ollama_based_agent/README.md)。
 
 ## 3. 從單一 Agent 開始
 
@@ -111,6 +133,17 @@ adk web workflow_agent
 adk web mcp_agent
 ```
 
+```powershell
+# Ollama 本機模型 Agent
+adk web ollama_based_agent
+```
+
+直接執行 Ollama 範例也可以：
+
+```powershell
+python ollama_based_agent/agent.py
+```
+
 依終端機顯示的網址開啟 ADK Web UI。請從專案根目錄執行，因為 MCP Agent 使用相對路徑 `mcp_agent/server.py` 啟動工具伺服器。ADK Web 是未驗證的本機開發服務，請勿暴露在不可信任的網路上。
 
 ## 常見問題
@@ -120,3 +153,5 @@ adk web mcp_agent
 - **模型名稱錯誤或不可用**：Workflow 使用 `deepseek/deepseek-flash`；教師與 MCP Agent 使用 `deepseek/deepseek-chat`。模型供應狀態可能變動，請同時檢查 DeepSeek 與 LiteLLM 的支援情況。
 - **MCP 工具沒有啟動**：確認已啟用虛擬環境，並從專案根目錄執行 `adk web mcp_agent`，以確保 `python mcp_agent/server.py` 路徑有效。
 - **API 連線錯誤**：確認網路、`DEEPSEEK_API_BASE`（`https://api.deepseek.com`）和服務狀態。
+- **Ollama 連線失敗**：確認 Ollama 正在執行，且 `ollama_based_agent/.env` 的 `OPENAI_API_BASE` 指向 `http://localhost:11434/v1`。
+- **Ollama 找不到模型**：執行 `ollama pull llava:7b`，並以 `ollama list` 確認模型已下載。
