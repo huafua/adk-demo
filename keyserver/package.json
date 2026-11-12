@@ -1,0 +1,11 @@
+{
+    "name":"keyserver",
+    "version": "1.0.0",
+    "main": "index.js",
+    "description":"A simple key server for managing authorization tokens",
+    "scripts": {
+        "dev": "node --watch --env-file=.env index.js"
+    },
+    "author": "huafua",
+    "license": "MIT"
+}

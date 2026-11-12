@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f5f7fb">
+    <title>授權金鑰管理｜ADK 控制台</title>
+    <link rel="stylesheet" href="index.css">
+</head>
+
+<body>
+    <main class="shell">
+        <header class="topbar">
+            <div class="brand">
+                <span class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M7.5 14.5 5 17v3h3l2.5-2.5" />
+                        <circle cx="15" cy="9" r="6" />
+                        <path d="m10.75 13.25 4.5-4.5" />
+                    </svg>
+                </span>
+                <span>ADK 控制台</span>
+                <span class="workspace-label">／授權管理</span>
+            </div>
+            <div class="topbar-actions">
+                <button class="button" id="refresh-button" type="button" aria-label="重新載入金鑰">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                        stroke-linejoin="round" aria-hidden="true">
+                        <path d="M20 7v5h-5M4 17v-5h5" />
+                        <path d="M6.1 9a7 7 0 0 1 11.6-2L20 12M4 12l2.3 5a7 7 0 0 0 11.6-2" />
+                    </svg>
+                    重新載入
+                </button>
+            </div>
+        </header>
+
+        <section class="intro" aria-labelledby="page-title">
+            <div class="eyebrow"><span class="eyebrow-dot"></span>ACCESS CONTROL</div>
+            <h1 id="page-title">授權金鑰</h1>
+            <p>管理服務存取憑證，掌握目前可用的授權金鑰。</p>
+        </section>
+
+        <section class="overview" aria-label="金鑰概況">
+            <article class="card metric-card">
+                <div>
+                    <div class="metric-label">目前啟用金鑰</div>
+                    <div class="metric-number" id="key-count" aria-live="polite">—</div>
+                    <div class="metric-caption">停用的金鑰無法通過授權</div>
+                </div>
+                <span class="metric-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <circle cx="8" cy="15" r="4" />
+                        <path d="m11 12 8-8 2 2-2 2 2 2-3 3-2-2-2 2" />
+                    </svg>
+                </span>
+            </article>
+            <article class="card security-card">
+                <span class="security-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z" />
+                        <path d="m9 12 2 2 4-4" />
+                    </svg>
+                </span>
+                <div>
+                    <div class="security-title">憑證安全提示</div>
+                    <p class="security-copy">金鑰預設以遮罩方式呈現。請勿將完整憑證分享給未授權人員。</p>
+                </div>
+            </article>
+        </section>
+
+        <section class="content-grid" aria-label="授權金鑰管理">
+            <article class="card list-card">
+                <div class="section-heading">
+                    <div>
+                        <h2>金鑰清單</h2>
+                        <p class="section-subtitle">檢視、複製、啟用／停用或刪除授權憑證</p>
+                    </div>
+                    <span class="count-badge" id="list-count" aria-label="金鑰數量">—</span>
+                </div>
+                <div class="selection-toolbar" id="selection-toolbar" hidden>
+                    <label class="select-all-control" for="select-all-keys">
+                        <input id="select-all-keys" type="checkbox" disabled>
+                        全選
+                    </label>
+                    <div class="selection-actions">
+                        <span class="selection-count" id="selected-count">已選 0 把</span>
+                        <button class="button" id="bulk-status-button" type="button" disabled
+                            aria-label="啟用所選金鑰" title="啟用所選金鑰">啟用所選</button>
+                        <button class="button button-danger" id="bulk-delete-button" type="button" disabled>
+                            刪除
+                        </button>
+                    </div>
+                </div>
+                <div class="key-list" id="key-list" aria-live="polite" aria-busy="true">
+                    <div class="loading-state">正在載入授權金鑰…</div>
+                </div>
+            </article>
+
+            <aside class="card create-card">
+                <h2>新增金鑰</h2>
+                <p>產生一組安全隨機憑證，建立後即可用於服務驗證。</p>
+                <form id="create-form">
+                    <label class="field-label" for="new-token">即將建立的金鑰</label>
+                    <div class="input-wrap">
+                        <input class="text-input" id="new-token" name="apiKey" type="text" autocomplete="off"
+                            aria-describedby="token-format" readonly required>
+                        <div class="input-actions">
+                            <button class="input-action" id="copy-pending-token" type="button">複製</button>
+                            <button class="input-action" id="regenerate-token" type="button">重新產生</button>
+                        </div>
+                    </div>
+                    <p class="form-note" id="token-format">格式：sk- 加 32 位小寫英數字</p>
+                    <button class="button button-primary create-button" id="create-button" type="submit">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M12 5v14M5 12h14" />
+                        </svg>
+                        建立授權金鑰
+                    </button>
+                </form>
+                <p class="form-note">停用不會刪除金鑰，可隨時重新啟用；刪除則無法復原。</p>
+            </aside>
+        </section>
+    </main>
+    <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
+    <dialog class="confirm-dialog" id="delete-dialog" aria-labelledby="delete-dialog-title"
+        aria-describedby="delete-dialog-description">
+        <div class="confirm-heading">
+            <span class="confirm-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6" />
+                </svg>
+            </span>
+            <div>
+                <h2 id="delete-dialog-title">刪除授權金鑰？</h2>
+                <p class="confirm-copy" id="delete-dialog-description">
+                    刪除後，使用這組金鑰的服務將無法通過授權。此操作無法復原。
+                </p>
+            </div>
+        </div>
+        <p class="dialog-error" id="delete-dialog-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+            <button class="button" id="cancel-delete" type="button">取消</button>
+            <button class="button button-danger" id="confirm-delete" type="button">刪除金鑰</button>
+        </div>
+    </dialog>
+
+    <script src="index.js"></script>
+</body>
+
+</html>
