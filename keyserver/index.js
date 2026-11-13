@@ -156,7 +156,7 @@ function getMimeType(ext) {
 const handleRequest = (req, res) => {
     const urlObject = new URL(req.url, `http://${req.headers.host}`)
     // 解析請求的 URL，並檢查路徑和方法以決定如何處理請求
-    if (urlObject.pathname === "/authorize" && req.method === "GET") {
+    if (urlObject.pathname === "/auth" && req.method === "GET") {
         // 取得請求中的 Authorization 標頭
         const authorization = req.headers["authorization"];
 
@@ -304,5 +304,5 @@ const handleRequest = (req, res) => {
 // 啟動 HTTP 伺服器，監聽指定的 PORT
 http.createServer(handleRequest).listen(PORT, () =>
     // 伺服器啟動成功後，輸出提示訊息
-    console.log(`Server running at ${PORT}`)
+    console.log(`\x1b[33m[${new Date().toISOString()}] - Server running at ${PORT}\x1b[0m`)
 )

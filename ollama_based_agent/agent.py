@@ -25,12 +25,16 @@ root_agent=Agent(
     tools=[]
 )
 
-simple_agent=Agent(
-    name="simple_agent",
-    instruction="you are an assistant like Jarvis from iron man, but funnier and smarter",
+jarvis_agent=Agent(
+    name="jarvis_agent",
+    instruction=(
+        "you are an assistant like Jarvis from iron man, but funnier and smarter, "
+        "and return **ONLY** the result without extra bullshit, and the language is " 
+        "always in uppercase Chinese"
+    ),
     description="An assistant like Jarvis from Iron Man, but funnier and smarter",
     model=LiteLlm(
-        model="openai/glm4:9b",
+        model= "openai/glm4:9b",
         api_key=os.getenv("OPENAI_API_KEY"),
         api_base=os.getenv("OPENAI_API_BASE")
     ),
@@ -91,7 +95,7 @@ async def another_main():
 
     runner=Runner(
         app_name=APP_NAME,
-        agent=simple_agent,
+        agent=jarvis_agent,
         session_service=session_service
     )
 

@@ -1,458 +1,145 @@
-# Nginx 反向代理为 Ollama LLM 提供 API Key 校验
+# 使用 Keyserver 驗證 Ollama API Key
 
-本文档说明如何使用 Nginx 反向代理结合 Node.js 认证服务，为 Ollama LLM 模型 API 提供 API Key 校验机制。
+本文說明如何讓 `ollama_based_agent` 經由 NGINX 呼叫本機 Ollama，並由 `keyserver` 驗證 API key。Ollama 本身的 OpenAI 相容 API 預設不驗證 key；Agent 必須使用 NGINX 的網址，直接呼叫 Ollama 會繞過驗證。
 
-## 整体架构
+## 架構與請求流程
 
-```
-┌──────────────────┐
-│  Python Agent    │ (使用 LiteLlm 调用 LLM)
-│  (agent.py)      │
-└────────┬─────────┘
-         │
-         │ HTTP 请求
-         │ Authorization: Bearer sk-xxx
-         │
-    ┌────▼───────────────────────┐
-    │  Nginx                     │
-    │  (反向代理)                 │
-    │  (ollama-auth.conf)        │
-    └──┬─────────────────────┬───┘
-       │                     │
-       │ auth_               │ 转发请求
-       │ request             │
-       │                     │
-   ┌───▼──────────────┐   ┌──▼───────────────┐
-   │Node JS           │   │ Ollama (LLM)     │
-   │认证服务           │   │ localhost:11434  │
-   │(auth-service.js) │   │ /v1/*            │
-   │(3000)            │   └──────────────────┘
-   └──────────────────┘
+```text
+ollama_based_agent (LiteLLM)
+  Authorization: Bearer <api-key>
+       │
+       ▼
+NGINX :81 /llm/...
+  ├─ auth_request /auth/ ──► Keyserver :3000/auth
+  └─ 驗證成功後 ───────────► Ollama :11434/v1/...
 ```
 
-## 源代码详解
+1. Agent 將 API key 放在 `Authorization: Bearer ...` 標頭。
+2. NGINX 對每個 `/llm/` 請求發出內部 `/auth/` 子請求，並將授權標頭交給 Keyserver 的 `GET /auth`。
+3. Keyserver 確認 key 存在且未停用後回傳 `200`；缺少、無效或停用的 key 回傳 `401`。
+4. 只有認證成功時，NGINX 才將原始請求轉給 Ollama。`/llm/` 前綴會依 NGINX 設定映射成 Ollama 的 `/v1/` 路徑。
 
-### 1. Nginx 配置文件 (ollama-auth.conf)
+## 需求
+
+- 已安裝並啟動 Ollama，以及 Agent 所使用的模型。
+- Node.js 支援 `--env-file`（Node.js 20.6 或更新版本）。
+- NGINX 已啟用 `auth_request` 模組。
+- 專案根目錄 `requirements.txt` 中的 Python 套件已安裝。
+
+## 啟動 Keyserver 與建立 key
+
+Keyserver 預設監聽 `3000` 埠；可在 `keyserver/.env` 設定 `PORT`，並同步更新 NGINX 設定中的 Keyserver 連線埠。從專案根目錄執行：
+
+```powershell
+Set-Location .\keyserver
+npm run dev
+```
+
+開啟管理頁面 `http://localhost:3000/static/index.html`，建立一組 key，並複製其值供 Agent 使用。管理頁面可檢視、啟用、停用及刪除 key。
+
+Keyserver 將 key 明文存放在 `keyserver/data/keys.txt`；停用狀態則以 SHA-256 指紋存放在 `keyserver/data/disabled-keys.txt`。請勿提交真實 key 或含 key 的 `.env`。
+
+## NGINX 設定
+
+`keyserver/ollama-auth.conf` 範例內容如下：
 
 ```nginx
-server{
+server {
     listen 81;
     server_name localhost;
-    
+
     location /llm/ {
         auth_request /auth/;
         proxy_pass http://localhost:11434/v1/;
     }
 
     location /auth/ {
+        internal;
         proxy_pass http://localhost:3000/auth;
     }
 }
 ```
 
-**核心配置说明：**
+- `/auth/` 是僅供 NGINX 內部子請求使用的位置，不可由外部直接呼叫。
+- `proxy_pass` 將 `/llm/models` 轉成 Ollama 的 `/v1/models`。
+- LiteLLM 的 `api_base` 應設為 `http://127.0.0.1:81/llm`（不要在結尾加 `/v1`）。LiteLLM 會附加 `/chat/completions`，NGINX 再將 `/llm/chat/completions` 映射為 Ollama 的 `/v1/chat/completions`。
+- 若 Keyserver 使用非預設埠，請將 `proxy_pass` 的 `3000` 改成相同埠。
 
-- **listen 81** - 监听 81 端口
-- **location /llm/** - LLM 请求的入口
-  - `auth_request /auth/` - 先向 `/auth/` 位置发起认证请求
-  - `proxy_pass http://localhost:11434/v1/` - 认证通过后转发给 Ollama
-- **location /auth/** - 认证服务的入口
-  - `proxy_pass http://localhost:3000/auth` - 转发给 Node.js 认证服务
+測試並啟動 NGINX 時，請將路徑替換成實際 NGINX 安裝目錄及此設定檔的位置：
 
-**工作流程：**
-
-1. 客户端请求 `/llm/models` → Nginx 收到请求
-2. Nginx 先执行 `auth_request /auth/` 进行认证
-3. `/auth/` 被转发到 Node.js 服务的 `/auth` 端点进行校验
-4. 认证通过 (200) → 转发原请求到 Ollama `/v1/models`
-5. 认证失败 (401/403) → 返回错误，不转发到 Ollama
-
-### 2. Node.js 认证服务 (auth-service.js)
-
-```javascript
-const http = require("http")
-
-const validApiKeys = [
-    'sk-d6ved24isinrd2g43wbyvd93arqk4cnx',
-    'sk-jkoez8xfda0x4rcwwqbmthhu8zmdn7l9',
-    'sk-o5i67lybgadcnye1khbqknqyrdmcapph',
-    'sk-n408h3435p2sjgrtgjysipjj7sezc2jh',
-    'sk-7nydp7jy3gtngdxb19d543pm3ktbhdcf',
-    'sk-en5oj81l24s7w6jcc7rtosx9q16nx74o',
-    'sk-gnyh2cytv2nx7ibak3cjjlmndwiv3d79',
-    'sk-4zjchqapg1li1ltbwqxp9zuc31mu90gz',
-    'sk-8jv1ifz5hgwl6triqjedt9ujdoymx827',
-    'sk-kfxz3sot2f27173u7iyasq6j2g48ib7i',
-    'sk-de4pker8o1b7ok84f4r187dcgtbjg7k1',
-    'sk-i3aar9diskboiv83hz29g31y0ylb5d4y',
-    'sk-92cnp88i73l9oi0ipf852ekb9m3ifx1q',
-    'sk-21ijzxfw2fyf79r3wd1yg86270h7u7rf',
-    'sk-17p9fzr9hu074ganqi2kbczv43pazlnp',
-    'sk-7oz9yqfr0xcq5k2knwsclxk17ihb8mtf',
-    'sk-fq5fyxzknkwljfou72jkzeuf25ryvy6c',
-    'sk-y6l5os6vqkjd7xuhshxl1c5kz65c3u8z',
-    'sk-arftt7coqberjqsqw3z3p4stbpc62qs8',
-    'sk-cx6gcgtxmb3u0g53f7cs389174zmfmri'
-]
-
-http.createServer((req, res) => {
-    let urlObject = new URL(req.url, `http://${req.headers.host}`)
-    if (urlObject.pathname.startsWith("/auth")) {
-        let authorization = req.headers["authorization"];
-        if (!authorization) {
-            res.writeHead(401, { 'Content-Type': 'text/plain' });
-            return res.end("Authorization required");
-        }
-        authorization = authorization.replace("Bearer ", "");
-        if (!validApiKeys.includes(authorization)) {
-            res.writeHead(403, { 'Content-Type': 'text/plain' });
-            return res.end(`Authorization is not valid - '${authorization}'`);
-        }
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        return res.end(`Authorization past - ${authorization}`);
-    }
-    if (urlObject.pathname.startsWith("/llm")) {
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        return res.end("LLM Endpoint");
-    }
-    res.end();
-}).listen(3000, () => {
-    console.log(`\x1b[33m ${new Date().toISOString()}: Server running at http://localhost:3000/\x1b[0m`);
-});
+```powershell
+.\nginx.exe -t -c C:\path\to\adk-demo\keyserver\ollama-auth.conf
+.\nginx.exe -c C:\path\to\adk-demo\keyserver\ollama-auth.conf
 ```
 
-**认证服务逻辑：**
+此範例的 `listen 81` 會監聽所有網路介面。若只供本機 Agent 使用，建議改為 `listen 127.0.0.1:81;`，並確認防火牆沒有對外開放服務埠。
 
-1. **检查 Authorization Header**
-   ```javascript
-   let authorization = req.headers["authorization"];
-   if (!authorization) {
-       res.writeHead(401);  // 缺少 Authorization 返回 401
-       return res.end("Authorization required");
-   }
-   ```
+## 設定及執行 Agent
 
-2. **提取 Bearer Token**
-   ```javascript
-   authorization = authorization.replace("Bearer ", "");
-   // "Authorization: Bearer sk-xxx" → "sk-xxx"
-   ```
+在 `ollama_based_agent/.env` 設定由 Keyserver 建立的 key 和 NGINX API 位址：
 
-3. **验证 API Key**
-   ```javascript
-   if (!validApiKeys.includes(authorization)) {
-       res.writeHead(403);  // 密钥无效返回 403
-       return res.end(`Authorization is not valid - '${authorization}'`);
-   }
-   ```
-
-4. **认证通过**
-   ```javascript
-   res.writeHead(200);
-   return res.end(`Authorization past - ${authorization}`);
-   ```
-
-**状态码含义：**
-- `200 OK` - 认证通过，Nginx 继续处理请求
-- `401 Unauthorized` - 缺少认证信息
-- `403 Forbidden` - 认证信息无效
-
-### 3. Python Agent 调用 (agent.py)
-
-```python
-import os
-
-from google.adk.agents import Agent
-from google.adk.models import LiteLlm
-from google.adk.sessions import InMemorySessionService
-from google.adk.runners import Runner
-from google.genai import types
-
-os.environ["LITELLM_LOCAL_MODEL_COST_MAP"]="True"
-
-root_agent = Agent(
-    name='root_agent',
-    model=LiteLlm(
-        model='openai/llava:7b',
-        api_key="sk-4zjchqapg1li1ltbwqxp9zuc31mu90gz",
-        api_base="http://localhost:81/llm/"
-    ),
-    instruction='Answer user questions to the best of your knowledge',
-    description='A helpful assistant for user questions.',
-)
-
-async def main():
-    USER_ID = "user_123"
-    APP_NAME = "demo_app"
-    session_service = InMemorySessionService()
-    session = await session_service.create_session(
-        app_name=APP_NAME,
-        user_id=USER_ID
-    )
-    runner = Runner(
-        app_name=APP_NAME,
-        agent=root_agent,
-        session_service=session_service        
-    )
-
-    events = runner.run_async(
-        user_id=session.user_id,
-        session_id=session.id,
-        new_message=types.Content(
-            role="user",
-            parts=[
-                types.Part.from_text(text="What's eight plus eleven?")
-            ]
-        )
-    )
-
-    async for event in events:
-        if event.content and event.content.parts and len(event.content.parts) > 0:
-            for part in event.content.parts:
-                if part.thought: continue
-                print(f"\x1b[32m[{event.author}]:{part.text}\x1b[0m")
-
-
-if __name__=="__main__":
-    import asyncio
-    asyncio.run(main())
+```env
+OPENAI_API_KEY=<your-keyserver-api-key>
+OPENAI_API_BASE=http://127.0.0.1:81/llm
 ```
 
-**关键配置：**
+不要在 `OPENAI_API_KEY` 值前加上 `Bearer `；LiteLLM 會自行建立授權標頭。`agent.py` 使用 `load_dotenv()` 載入環境變數。
 
-- **api_key** - 必须是 `validApiKeys` 中的有效密钥
-  ```python
-  api_key="sk-4zjchqapg1li1ltbwqxp9zuc31mu90gz"
-  ```
+從專案根目錄啟動互動式 Python Agent：
 
-- **api_base** - 指向 Nginx 反向代理地址
-  ```python
-  api_base="http://localhost:81/llm/"
-  ```
-
-- **LiteLlm 工作流程：**
-  1. 接收用户问题
-  2. 自动添加 `Authorization: Bearer sk-4zjchqapg1li1ltbwqxp9zuc31mu90gz` Header
-  3. 发送 HTTP 请求到 `http://localhost:81/llm/v1/chat/completions`
-  4. Nginx 先校验 API Key
-  5. 认证通过后转发到 Ollama
-  6. 返回响应给 Agent
-
-## 请求流程图
-
-### 成功的请求流程
-
-```
-Python Agent
-    │
-    │ POST /llm/v1/chat/completions
-    │ Authorization: Bearer sk-4zjchqapg1li1ltbwqxp9zuc31mu90gz
-    │
-    ▼
-Nginx (81 端口)
-    │
-    ├─→ auth_request /auth/
-    │   │
-    │   ▼
-    │   转发到 http://localhost:3000/auth
-    │   (Node.js 检查 Header)
-    │
-    │   返回 200 OK
-    │   ✓ 认证通过
-    │
-    ├─→ proxy_pass http://localhost:11434/v1/
-    │
-    ▼
-Ollama LLM (11434 端口)
-    │
-    ▼
-处理请求 + 返回结果
-    │
-    ▼
-Python Agent 收到响应
+```powershell
+python ollama_based_agent/agent.py
 ```
 
-### 失败的请求流程
+此命令執行 `another_main()`，使用 `jarvis_agent` 和模型 `openai/glm4:9b`。若使用 ADK Web 載入 `root_agent`，則會使用 `openai/llava:7b`：
 
-```
-Python Agent
-    │
-    │ POST /llm/v1/chat/completions
-    │ Authorization: Bearer invalid-key
-    │
-    ▼
-Nginx (81 端口)
-    │
-    ├─→ auth_request /auth/
-    │   │
-    │   ▼
-    │   转发到 http://localhost:3000/auth
-    │   (Node.js 检查 Header)
-    │
-    │   返回 403 Forbidden
-    │   ✗ 认证失败
-    │
-    ├─→ 停止处理，不转发到 Ollama
-    │
-    ▼
-返回 403 Forbidden 给客户端
+```powershell
+adk web ollama_based_agent
 ```
 
-## 安装和运行
+請先用 Ollama 下載所選入口使用的模型，例如：
 
-### 1. 启动 Node.js 认证服务
-
-```bash
-cd d:\Applications\nginx-1.30.6\conf
-node auth-service.js
+```powershell
+ollama pull glm4:9b
+ollama pull llava:7b
 ```
 
-输出：
-```
-2026-11-13T06:30:00.000Z: Server running at http://localhost:3000/
-```
+這些模型名稱中的 `openai/` 是 LiteLLM 的 OpenAI 相容介面 provider 前綴；實際請求透過 `OPENAI_API_BASE` 指向本機 NGINX 與 Ollama。
 
-### 2. 启动 Ollama (假设已安装)
+## 驗證設定
 
-```bash
-ollama serve
-# Ollama 监听在 http://localhost:11434
+確認 Keyserver、NGINX 和 Ollama 均已啟動，並以已建立的 key 測試：
+
+```powershell
+curl.exe -i -H "Authorization: Bearer <your-keyserver-api-key>" http://127.0.0.1:81/llm/models
 ```
 
-### 3. 启动 Nginx
+認證成功後，請求會轉送至 Ollama 的 `/v1/models`。以下測試應分別得到 `401 Unauthorized`：
 
-编辑 Nginx 配置使用 `ollama-auth.conf`：
+```powershell
+# 缺少 Authorization 標頭
+curl.exe -i http://127.0.0.1:81/llm/models
 
-```bash
-cd d:\Applications\nginx-1.30.6
-nginx -c conf/ollama-auth.conf
+# 無效或已停用的 key
+curl.exe -i -H "Authorization: Bearer invalid-key" http://127.0.0.1:81/llm/models
 ```
 
-### 4. 运行 Python Agent
+若回應為 `502 Bad Gateway`，請確認 Ollama 是否正在 `11434` 埠接受連線。若回應為 `401`，請確認 key 已在 Keyserver 建立且處於啟用狀態，並確認 Agent 使用 NGINX 的 API base，而不是直接使用 `http://localhost:11434/v1`。
 
-```bash
-python demo_agent/agent.py
-```
+## Keyserver API
 
-## 使用 curl 测试
+| 方法與路徑 | 用途 |
+| --- | --- |
+| `GET /auth` | 驗證 `Authorization: Bearer <key>`；有效且啟用時回傳 `200`，缺少、無效或停用時回傳 `401`。 |
+| `GET /keys` | 回傳 key 清單及 `enabled` 狀態。 |
+| `POST /create` | 以 `application/x-www-form-urlencoded` 的 `apiKey=<key>` 建立 key。 |
+| `PATCH /status` | 以 JSON `{ "apiKeys": ["<key>"], "enabled": false }` 批次啟用或停用 key。 |
+| `DELETE /delete?apiKey=<key>` | 刪除指定 key。 |
+| `GET /static/index.html` | 提供 key 管理頁面。 |
 
-### 测试有效的 API Key
+## 安全注意事項
 
-```bash
-curl -i -H "Authorization: Bearer sk-4zjchqapg1li1ltbwqxp9zuc31mu90gz" http://localhost:81/llm/models
-```
-
-响应（来自 Ollama）：
-```
-HTTP/1.1 200 OK
-...
-{"object":"list","data":[...]}
-```
-
-### 测试无效的 API Key
-
-```bash
-curl -i -H "Authorization: Bearer invalid-key" http://localhost:81/llm/models
-```
-
-响应：
-```
-HTTP/1.1 403 Forbidden
-Authorization is not valid - 'invalid-key'
-```
-
-### 测试缺少 Authorization
-
-```bash
-curl -i http://localhost:81/llm/v1/models
-```
-
-响应：
-```
-HTTP/1.1 401 Unauthorized
-Authorization required
-```
-
-## 安全性考虑
-
-### 1. API Key 管理
-- ✅ API Key 存储在服务器内存中
-- ⚠️ 生产环境应该：
-  - 存储在数据库中
-  - 使用哈希算法保存（不存储明文）
-  - 使用环境变量或密钥管理服务
-
-### 2. 加密传输
-- ⚠️ 当前使用 HTTP，生产环境应该：
-  - 使用 HTTPS/SSL
-  - 配置 Nginx SSL 证书
-  - 启用 TLS 1.2+
-
-### 3. 速率限制
-- ⚠️ 当前没有速率限制，应该：
-  - 在 Nginx 中配置 `limit_req`
-  - 按 API Key 进行速率限制
-  - 防止 DDoS 攻击
-
-### 4. 日志记录
-- ⚠️ 当前没有详细日志，应该：
-  - 记录所有认证请求
-  - 记录失败的认证尝试
-  - 便于审计和排查
-
-
-## 常见问题
-
-### Q: 为什么 Nginx 需要先验证再转发？
-
-A: 这叫做"认证网关"模式，优点：
-- 保护后端 Ollama 服务不被非法访问
-- 集中管理认证逻辑
-- 不需要修改 Ollama 代码
-- 可以灵活添加认证、日志、速率限制等
-
-### Q: auth_request 返回非 200 的状态码会怎样？
-
-A: Nginx 会：
-1. 停止处理原请求
-2. 返回认证失败的状态码给客户端
-3. 不转发到后端 Ollama
-4. 所以 Ollama 完全看不到非法请求
-
-### Q: 如何在 Nginx 中记录认证信息？
-
-A: 添加到 `ollama-auth.conf`：
-
-```nginx
-location /llm/ {
-    auth_request /auth/;
-    auth_request_set $auth_status $upstream_status;
-    proxy_pass http://localhost:11434/v1/;
-    access_log /path/to/llm-access.log '$remote_addr - [$time_local] "$request" $auth_status';
-}
-```
-
-### Q: 如何限制特定 IP 访问？
-
-A: 在 location 中添加：
-
-```nginx
-location /llm/ {
-    allow 192.168.1.0/24;
-    allow 127.0.0.1;
-    deny all;
-    auth_request /auth/;
-    proxy_pass http://localhost:11434/v1/;
-}
-```
-
-## 总结
-
-这个方案展示了如何：
-
-1. **使用 Nginx `auth_request`** - 在转发前进行认证
-2. **Node.js 认证服务** - 灵活的、可扩展的认证逻辑
-3. **保护 Ollama LLM** - 仅允许有效 API Key 访问
-4. **无缝集成 Python Agent** - 使用 LiteLlm 自动添加认证 Header
-
-这种"网关认证"模式在微服务架构中非常常见，可以保护任何后端服务。
+- `/keys`、`/create`、`/status`、`/delete` 和管理頁面沒有額外身分驗證。Keyserver 目前以 `listen(PORT)` 啟動，可能監聽所有網路介面；請勿直接暴露到不可信任網路，並以防火牆或其他網路控制限制存取。
+- `keyserver/data/keys.txt` 以明文保存 key。保護該檔案、`keyserver/.env` 及 `ollama_based_agent/.env`，並勿將真實 key 寫入文件或提交到版本控制。
+- NGINX 範例使用 HTTP，且 `listen 81` 預設可能對其他主機可達。若需跨主機使用，應另外設定 TLS、防火牆及管理端點存取控制。
+- 直接連接 Ollama 的 `11434` 埠會略過 Keyserver 驗證；請限制該埠的網路存取。
